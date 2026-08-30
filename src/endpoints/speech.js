@@ -430,3 +430,148 @@ elevenlabs.post('/recognize', async (req, res) => {
 });
 
 router.use('/elevenlabs', elevenlabs);
+
+const audiocpp = express.Router();
+
+/**
+ * Normalizes a user-supplied audio.cpp server address into a base URL without the API prefix.
+ * Tolerates a bare host:port, a trailing slash, or a full endpoint path being pasted in.
+ * @param {string} endpoint Address as entered in the provider settings
+ * @returns {string|null} Base URL without a trailing slash, or null if unusable
+ */
+function getAudioCppBaseUrl(endpoint) {
+    if (!endpoint || typeof endpoint !== 'string') {
+        return null;
+    }
+
+    const value = endpoint.trim();
+
+    if (!value) {
+        return null;
+    }
+
+    try {
+        const url = new URL(/^https?:\/\//i.test(value) ? value : `http://${value}`);
+        url.search = '';
+        url.hash = '';
+
+        const path = url.pathname.replace(/\/+$/, '');
+        const apiIndex = path.toLowerCase().indexOf('/v1');
+        url.pathname = apiIndex >= 0 ? path.slice(0, apiIndex) : path;
+
+        return url.toString().replace(/\/+$/, '');
+    } catch {
+        return null;
+    }
+}
+
+audiocpp.post('/models', async (req, res) => {
+    try {
+        const base = getAudioCppBaseUrl(req.body.provider_endpoint);
+
+        if (!base) {
+            console.warn('No audio.cpp provider endpoint provided');
+            return res.sendStatus(400);
+        }
+
+        const response = await fetch(`${base}/v1/models`);
+
+        if (!response.ok) {
+            const text = await response.text();
+            console.warn(`audio.cpp model list fetch failed: HTTP ${response.status} - ${text}`);
+            return res.sendStatus(500);
+        }
+
+        const responseJson = await response.json();
+        return res.json(responseJson);
+    } catch (error) {
+        console.error(error);
+        return res.sendStatus(500);
+    }
+});
+
+audiocpp.post('/voices', async (req, res) => {
+    try {
+        const base = getAudioCppBaseUrl(req.body.provider_endpoint);
+
+        if (!base) {
+            console.warn('No audio.cpp provider endpoint provided');
+            return res.sendStatus(400);
+        }
+
+        const url = new URL(`${base}/v1/audio/voices`);
+
+        // Omitting the model is only valid when the server has exactly one model configured.
+        if (req.body.model) {
+            url.searchParams.set('model', String(req.body.model));
+        }
+
+        const response = await fetch(url);
+
+        if (!response.ok) {
+            const text = await response.text();
+            console.warn(`audio.cpp voice list fetch failed: HTTP ${response.status} - ${text}`);
+            return res.sendStatus(500);
+        }
+
+        const responseJson = await response.json();
+        return res.json(responseJson);
+    } catch (error) {
+        console.error(error);
+        return res.sendStatus(500);
+    }
+});
+
+audiocpp.post('/generate', async (req, res) => {
+    try {
+        const base = getAudioCppBaseUrl(req.body.provider_endpoint);
+
+        if (!base) {
+            console.warn('No audio.cpp provider endpoint provided');
+            return res.sendStatus(400);
+        }
+
+        const request = req.body.request;
+
+        if (!request || typeof request !== 'object') {
+            console.warn('audio.cpp synthesis request missing request body');
+            return res.sendStatus(400);
+        }
+
+        const streaming = request.stream_format === 'sse';
+        console.debug('audio.cpp TTS request:', request);
+
+        const response = await fetch(`${base}/v1/audio/speech`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(streaming ? { 'Accept': 'text/event-stream' } : {}),
+            },
+            body: JSON.stringify(request),
+        });
+
+        if (!response.ok) {
+            const text = await response.text();
+            console.warn(`audio.cpp synthesis failed: HTTP ${response.status} - ${text}`);
+            return res.status(500).send(text);
+        }
+
+        // forwardFetchResponse only pipes the body, so the content type has to be set here.
+        if (streaming) {
+            // Compression is applied globally and text/event-stream is compressible;
+            // no-transform makes the middleware skip it so deltas aren't buffered.
+            res.set('Content-Type', 'text/event-stream');
+            res.set('Cache-Control', 'no-cache, no-transform');
+            res.set('Connection', 'keep-alive');
+        } else {
+            res.set('Content-Type', response.headers.get('content-type') || 'audio/wav');
+        }
+
+        await forwardFetchResponse(response, res);
+    } catch (error) {
+        console.error(error);
+        return res.sendStatus(500);
+    }
+});
+
+router.use('/audiocpp', audiocpp);

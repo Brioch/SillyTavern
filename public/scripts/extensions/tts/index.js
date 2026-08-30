@@ -18,6 +18,7 @@ import { VITSTtsProvider } from './vits.js';
 import { GSVITtsProvider } from './gsvi.js';
 import { SBVits2TtsProvider } from './sbvits2.js';
 import { AllTalkTtsProvider } from './alltalk.js';
+import { AudioCppTtsProvider } from './audiocpp.js';
 import { CosyVoiceProvider } from './cosyvoice.js';
 import { SpeechT5TtsProvider } from './speecht5.js';
 import { AzureTtsProvider } from './azure.js';
@@ -123,6 +124,7 @@ export function registerTtsProvider(name, provider) {
 
 const ttsProviders = {
     AllTalk: AllTalkTtsProvider,
+    'audio.cpp': AudioCppTtsProvider,
     Azure: AzureTtsProvider,
     Chatterbox: ChatterboxTtsProvider,
     Chutes: ChutesTtsProvider,
